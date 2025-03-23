@@ -1,28 +1,27 @@
 import platform.window;
+import platform;
 
-#include <sdl3/sdl.h>
+#include <SDL3/SDL.h>
 
 int main() {
-    greet();
-
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!init_platform()) {
         SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
     }
 
-    SDL_Log("Welcome to Bodies!");
-
-    SDL_Window *window = SDL_CreateWindow("Bodies", 1920, 1080, SDL_WINDOW_RESIZABLE);
-    if (window == nullptr) {
+    if (!create_window("Bodies", 1920, 1080)) {
         SDL_Log("Failed to create window: %s", SDL_GetError());
-        return -1;
     }
 
     bool quit = false;
     while (!quit) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                quit = true;
+        poll_window_events();
+
+        for (const auto &event: window_events) {
+            switch (event.type) {
+                case EventType::QUIT: {
+                    quit = true;
+                    break;
+                }
             }
         }
     }
