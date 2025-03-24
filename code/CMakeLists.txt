@@ -1,22 +1,20 @@
 cmake_minimum_required(VERSION 3.30)
-set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
-project(bodies LANGUAGES CXX)
+project(bodies LANGUAGES C)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_MODULE_STD 1)
+set(CMAKE_CXX_STANDARD 17)
 
 find_package(SDL3 REQUIRED PATHS ../installed/cmake)
 
 add_executable(bodies
-        main.cpp
-        platform.cpp
-        platform.window.cpp
+        main.c
+        platform.c
+        platform.window.c
 )
 
 target_sources(bodies PUBLIC
-        FILE_SET CXX_MODULES FILES
-        platform.ixx
-        platform.window.ixx
+        core.log.h
+        platform.h
+        platform.window.h
 )
 
 # Windows
