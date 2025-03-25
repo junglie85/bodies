@@ -1,20 +1,20 @@
 cmake_minimum_required(VERSION 3.30)
 project(bodies LANGUAGES C)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_STANDARD 99)
 
 find_package(SDL3 REQUIRED PATHS ../installed/cmake)
 
 add_executable(bodies
         main.c
-        platform.c
-        platform.window.c
+        application.c
+        error.h
+        log.c
 )
 
 target_sources(bodies PUBLIC
-        core.log.h
-        platform.h
-        platform.window.h
+        application.h
+        log.h
 )
 
 # Windows
