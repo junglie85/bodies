@@ -1,17 +1,22 @@
 $ErrorActionPreference = "Stop"
 
+$extracted_path = "$PSScriptRoot\..\temp\extracted"
+$install_path = "$PSScriptRoot\..\installed"
+
 #################################### SDL ######################################
 # todo: configure which SDL subsystems and options we actually need
 
 $name = "SDL-release-3.2.8"
-$temp_path = "$PSScriptRoot\..\temp\${name}"
+$dependency_path = "$PSScriptRoot\..\dependencies\${name}.zip"
+$source_path = "${extracted_path}\${name}"
+$build_path = "$PSScriptRoot\..\temp\build\${name}"
 
-if (Test-Path -LiteralPath ${temp_path})
+if (Test-Path -LiteralPath ${source_path})
 {
-    Remove-Item -Path ${temp_path} -Recurse -Force
+    Remove-Item -Path ${source_path} -Recurse -Force
 }
 # todo: check whether zip file has already been extracted and is up to date
-Expand-Archive -Path "$PSScriptRoot\..\dependencies\${name}.zip" -DestinationPath "$PSScriptRoot\..\temp\extracted"
+Expand-Archive -Path "${dependency_path}" -DestinationPath "${extracted_path}"
 
 cmake -DCMAKE_BUILD_TYPE=Debug `
     -DSDL_SHARED_DEFAULT=OFF `
@@ -20,26 +25,29 @@ cmake -DCMAKE_BUILD_TYPE=Debug `
     -DSDL_TEST_LIBRARY=OFF `
     -DSDL_EXAMPLES=OFF `
     -DSDL_INSTALL=ON `
-    -DCMAKE_INSTALL_PREFIX="$PSScriptRoot\..\installed" `
-    -S"$PSScriptRoot\..\temp\extracted\${name}" `
-    -B"$PSScriptRoot\..\temp\build\${name}" `
+    -DCMAKE_INSTALL_PREFIX="${install_path}" `
+    -S"${source_path}" `
+    -B"${build_path}" `
     -DCMAKE_C_COMPILER=cl `
     -GNinja
-if ($LastExitCode -ne 0) {
+if ($LastExitCode -ne 0)
+{
     exit $LastExitCode
 }
 
 cmake --build `
-    "$PSScriptRoot\..\temp\build\${name}" `
+    "${build_path}" `
     --config Debug
-if ($LastExitCode -ne 0) {
+if ($LastExitCode -ne 0)
+{
     exit $LastExitCode
 }
 
 cmake --install `
-    "$PSScriptRoot\..\temp\build\${name}" `
+    "${build_path}" `
     --config Debug `
-    --prefix "$PSScriptRoot\..\installed"
-if ($LastExitCode -ne 0) {
+    --prefix "${install_path}"
+if ($LastExitCode -ne 0)
+{
     exit $LastExitCode
 }
