@@ -8,13 +8,12 @@ find_package(SDL3 REQUIRED PATHS ../installed/cmake)
 add_executable(bodies
         main.c
         application.c
+        application.h
         error.h
         log.c
-)
-
-target_sources(bodies PUBLIC
-        application.h
         log.h
+        window.c
+        window.h
 )
 
 # Windows
