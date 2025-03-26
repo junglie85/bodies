@@ -27,6 +27,12 @@ void create_window(const char *title, const int32_t width, const int32_t height)
     log_info("Created window with title=%s, width=%d, height=%d", title, width, height);
 }
 
+void destroy_window(void)
+{
+    SDL_DestroyWindow(window);
+    log_info("Destroyed window");
+}
+
 bool run_window_event_loop(void)
 {
     SDL_Event event;

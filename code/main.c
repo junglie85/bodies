@@ -3,7 +3,7 @@
 
 int main(void)
 {
-    init_application();
+    startup_application();
     create_window("Bodies", 1920, 1080);
 
     while (run_window_event_loop()) {
@@ -11,6 +11,9 @@ int main(void)
             exit_window_event_loop();
         }
     }
+
+    destroy_window();
+    shutdown_application();
 
     return 0;
 }

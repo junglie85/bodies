@@ -6,6 +6,8 @@
 
 void create_window(const char *title, int32_t width, int32_t height);
 
+void destroy_window(void);
+
 bool run_window_event_loop(void);
 
 bool close_window_requested(void);
