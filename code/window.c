@@ -9,28 +9,28 @@
 #include "error.h"
 #include "log.h"
 
-static SDL_Window *window;
-static bool was_close_requested;
-static bool keep_running;
+static SDL_Window *g_window;
+static bool g_was_close_requested;
+static bool g_keep_running;
 
 void create_window(const char *title, const int32_t width, const int32_t height)
 {
-    window = SDL_CreateWindow(title, width, height, SDL_WINDOW_RESIZABLE);
-    if (window == 0) {
-        log_error("Failed to create window: %s", SDL_GetError());
+    g_window = SDL_CreateWindow(title, width, height, SDL_WINDOW_RESIZABLE);
+    if (g_window == NULL) {
+        log_error(LOG_CATEGORY_WINDOW, "Failed to create window: %s.", SDL_GetError());
         exit_application(WINDOW_CREATION_ERROR);
     }
 
-    was_close_requested = false;
-    keep_running = true;
+    g_was_close_requested = false;
+    g_keep_running = true;
 
-    log_info("Created window with title=%s, width=%d, height=%d", title, width, height);
+    log_info(LOG_CATEGORY_WINDOW, "Created window with title=%s, width=%d, height=%d.", title, width, height);
 }
 
 void destroy_window(void)
 {
-    SDL_DestroyWindow(window);
-    log_info("Destroyed window");
+    SDL_DestroyWindow(g_window);
+    log_info(LOG_CATEGORY_WINDOW, "Destroyed window.");
 }
 
 bool run_window_event_loop(void)
@@ -38,19 +38,19 @@ bool run_window_event_loop(void)
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_QUIT) {
-            was_close_requested = true;
+            g_was_close_requested = true;
         }
     }
 
-    return keep_running;
+    return g_keep_running;
 }
 
 bool close_window_requested(void)
 {
-    return was_close_requested;
+    return g_was_close_requested;
 }
 
 void exit_window_event_loop(void)
 {
-    keep_running = false;
+    g_keep_running = false;
 }

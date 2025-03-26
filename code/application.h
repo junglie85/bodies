@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 
-void startup_application(void);
+void start_application(void);
 
-void shutdown_application(void);
+void stop_application(void);
 
 void exit_application(int32_t exit_code);
 

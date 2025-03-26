@@ -4,6 +4,8 @@ project(bodies VERSION 0.0.1 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+option(FEATURE_MEMORY_STATS "Record memory usage statistics" OFF)
+
 find_package(BodiesVendor REQUIRED PATHS ../installed/cmake)
 find_package(SDL3 REQUIRED PATHS ../installed/cmake)
 
@@ -16,6 +18,8 @@ add_executable(bodies
         log.h
         window.c
         window.h
+        memory.c
+        memory.h
 )
 
 set(LIBS bodies::vendor SDL3::SDL3-static)
@@ -28,3 +32,7 @@ target_compile_options(bodies PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/FC /Zi /W4 /WX /external:anglebrackets /external:W0>
         # $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra -Werror>
 )
+
+if (FEATURE_MEMORY_STATS)
+    target_compile_definitions(bodies PRIVATE FEATURE_MEMORY_STATS)
+endif ()
