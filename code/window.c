@@ -54,3 +54,8 @@ void exit_window_event_loop(void)
 {
     g_keep_running = false;
 }
+
+void *window_handle(void)
+{
+    return g_window;
+}

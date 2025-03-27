@@ -5,6 +5,7 @@ typedef enum log_category_t log_category_t;
 enum log_category_t
 {
     LOG_CATEGORY_APPLICATION,
+    LOG_CATEGORY_GPU,
     LOG_CATEGORY_MEMORY,
     LOG_CATEGORY_WINDOW,
 };
