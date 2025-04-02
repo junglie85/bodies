@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.30)
 project(bodies VERSION 0.0.1 LANGUAGES C)
 
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(FEATURE_MEMORY_STATS "Record memory usage statistics" OFF)
 
 find_package(BodiesVendor REQUIRED PATHS ../installed/cmake)
 find_package(SDL3 REQUIRED PATHS ../installed/cmake)
+find_package(cglm REQUIRED PATHS ../installed/lib/cmake/cglm)
 
 add_executable(bodies
         main.c
@@ -22,7 +23,7 @@ add_executable(bodies
         memory.h
 )
 
-set(LIBS bodies::vendor SDL3::SDL3-static)
+set(LIBS bodies::vendor SDL3::SDL3-static cglm::cglm)
 
 # Windows
 list(APPEND LIBS Winmm SetupAPI Imm32 Version)

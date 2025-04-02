@@ -1,3 +1,9 @@
+cbuffer Uniform : register(b0, space1)
+{
+    float4x4 mvp : packoffset(c0);
+};
+
+
 struct Input
 {
     float2 position : TEXCOORD0;
@@ -14,6 +20,6 @@ Output main(Input input)
 {
     Output output;
     output.color = input.color;
-    output.position = float4(input.position, 0.0f, 1.0f);
+    output.position = mul(mvp, float4(input.position, 0.0f, 1.0f));
     return output;
 }

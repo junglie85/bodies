@@ -1,9 +1,57 @@
 #include <SDL3/SDL.h>
+#include <cglm/struct.h>
 
 #include "application.h"
 #include "error.h"
 #include "log.h"
 #include "window.h"
+
+typedef struct uniform_t uniform_t;
+struct uniform_t
+{
+    mat4s mvp;
+};
+
+typedef struct camera_t camera_t;
+struct camera_t
+{
+    vec2s position;
+    vec2s size;
+    float rotation;
+    float zoom;
+};
+
+camera_t make_camera(vec2s position, vec2s size)
+{
+    return (camera_t){
+        .position = position,
+        .size = size,
+        .rotation = 0.0f,
+        .zoom = 1.0f,
+    };
+}
+
+mat4s get_camera_view_matrix(const camera_t *const camera)
+{
+    const vec2s size = glms_vec2_scale(camera->size, camera->zoom);
+    const mat4s projection = glms_ortho(0.0f, size.x, size.y, 0.0f, 0.0f, 1.0f);
+    return projection;
+}
+
+mat4s get_camera_projection_matrix(const camera_t *const camera)
+{
+    vec2s offset = glms_vec2_scale(camera->size, 0.5f);
+    vec2s origin = glms_vec2_add(camera->position, offset);
+
+    // todo: use glms_lookat?
+    mat4s view = glms_translate_make(glms_vec3_make((float[]){ camera->position.x, camera->position.y, 0.0f }));
+    view = glms_mat4_mul(view, glms_translate_make(glms_vec3_make((float[]){ origin.x, origin.y, 0.0f })));
+    view = glms_mat4_mul(view, glms_rotate_make(camera->rotation, glms_vec3_make((float[]){ 0.0f, 0.0f, 1.0f })));
+    view = glms_mat4_mul(view, glms_translate_make(glms_vec3_negate(glms_vec3_make((float[]){ origin.x, origin.y, 0.0f }))));
+    view = glms_mat4_mul(view, glms_scale_make(glms_vec3_make((float[]){ 1.0f, 1.0f, 1.0f })));
+    view = glms_mat4_mul(view, glms_mat4_inv(view));
+    return view;
+}
 
 typedef struct material_vertex_t material_vertex_t;
 struct material_vertex_t
@@ -12,7 +60,7 @@ struct material_vertex_t
     float color[4];
 };
 
-SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename)
+SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, int32_t uniform_buffer_count)
 {
     SDL_GPUShaderStage stage;
     if (SDL_strstr(filename, ".vert")) {
@@ -31,7 +79,7 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename)
     const char *entrypoint;
 
     // todo: this is currently the build directory but can we add a feature flag and inject the project or debugger cwd?
-    const char* base_path = SDL_GetBasePath();
+    const char *base_path = SDL_GetBasePath();
 
     if (backend_formats & SDL_GPU_SHADERFORMAT_SPIRV) {
         SDL_snprintf(full_path, sizeof(full_path), "%s../data/%s.spv", base_path, filename);
@@ -58,11 +106,16 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename)
     }
 
     SDL_GPUShaderCreateInfo shader_info = {
-    .code = code,
-    .code_size = code_size,
-    .entrypoint = entrypoint,
-    .format = format,.stage = stage,
-    .num_samplers = 0,.num_uniform_buffers = 0, .num_storage_buffers = 0, .num_storage_textures = 0};
+        .code = code,
+        .code_size = code_size,
+        .entrypoint = entrypoint,
+        .format = format,
+        .stage = stage,
+        .num_samplers = 0,
+        .num_uniform_buffers = uniform_buffer_count,
+        .num_storage_buffers = 0,
+        .num_storage_textures = 0
+    };
 
     SDL_GPUShader *shader = SDL_CreateGPUShader(device, &shader_info);
     if (shader == NULL) {
@@ -94,14 +147,15 @@ int main(void)
         exit(GPU_WINDOW_CLAIM_ERROR);
     }
 
-    // -----
-    SDL_GPUShader *vertex_shader = load_shader(device, "material.vert");
+    // ----- create shaders
+    // todo: tell shaders how many uniform buffers there are.
+    SDL_GPUShader *vertex_shader = load_shader(device, "material.vert", 1);
     if (vertex_shader == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to create vertex shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
     }
 
-    SDL_GPUShader *fragment_shader = load_shader(device, "material.frag");
+    SDL_GPUShader *fragment_shader = load_shader(device, "material.frag", 0);
     if (fragment_shader == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to create fragment shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
@@ -155,6 +209,8 @@ int main(void)
     SDL_ReleaseGPUShader(device, vertex_shader);
     SDL_ReleaseGPUShader(device, fragment_shader);
 
+    // todo: model-view-projection uniform buffer
+
     SDL_GPUBuffer *vertex_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo){
@@ -162,29 +218,30 @@ int main(void)
             .size = sizeof(material_vertex_t) * 3,
         });
 
-    // -- Upload vertex data to vertex buffer via a transfer buffer.
-    SDL_GPUTransferBuffer *transfer_buffer = SDL_CreateGPUTransferBuffer(
+    // -- Write vertex data to vertex buffer via a transfer buffer.
+    SDL_GPUTransferBuffer *vertex_transfer_buffer = SDL_CreateGPUTransferBuffer(
         device,
         &(SDL_GPUTransferBufferCreateInfo){
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
             .size = sizeof(material_vertex_t) * 3,
         });
 
-    material_vertex_t *transfer_data = SDL_MapGPUTransferBuffer(device, transfer_buffer, false);
+    material_vertex_t *transfer_data = SDL_MapGPUTransferBuffer(device, vertex_transfer_buffer, false);
 
-    transfer_data[0] = (material_vertex_t){ 0.0f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f };
-    transfer_data[1] = (material_vertex_t){ -0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f };
-    transfer_data[2] = (material_vertex_t){ 0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f };
+    transfer_data[0] = (material_vertex_t){ 0.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    transfer_data[1] = (material_vertex_t){ 50.0f, 100.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    transfer_data[2] = (material_vertex_t){ 100.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
 
-    SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
+    SDL_UnmapGPUTransferBuffer(device, vertex_transfer_buffer);
 
+    // Upload the data to the GPU.
     SDL_GPUCommandBuffer *upload_cmd_buf = SDL_AcquireGPUCommandBuffer(device);
     SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(upload_cmd_buf);
 
     SDL_UploadToGPUBuffer(
         copy_pass,
         &(SDL_GPUTransferBufferLocation){
-            .transfer_buffer = transfer_buffer,
+            .transfer_buffer = vertex_transfer_buffer,
             .offset = 0,
         },
         &(SDL_GPUBufferRegion){
@@ -196,7 +253,24 @@ int main(void)
 
     SDL_EndGPUCopyPass(copy_pass);
     SDL_SubmitGPUCommandBuffer(upload_cmd_buf);
-    SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
+    SDL_ReleaseGPUTransferBuffer(device, vertex_transfer_buffer);
+
+    // ------------
+    camera_t camera = make_camera(glms_vec2_make((float[]){ 0.0f, 0.0f }), glms_vec2_make((float[]){ 1920.0f, 1080.0f }));
+    mat4s projection = get_camera_projection_matrix(&camera);
+    mat4s view = get_camera_view_matrix(&camera);
+
+    mat4s model = glms_mat4_mulN(
+        (mat4s *[]){
+            glms_scale_make(glms_vec3_make((float[]){ 1.0f, 1.0f, 0.0f })).raw,
+            glms_rotate_make(0.0f, glms_vec3_make((float[]){ 0.0f, 0.0f, 1.0f })).raw,
+            glms_translate_make(glms_vec3_make((float[]){ 0.0f, 0.0f, 0.0f })).raw,
+        },
+        3);
+
+    mat4s mvp = glms_mat4_mulN((mat4s *[]){ projection.raw, view.raw, model.raw }, 3);
+
+    uniform_t uniform = { .mvp = mvp };
 
     while (run_window_event_loop()) {
         if (close_window_requested()) {
@@ -221,7 +295,7 @@ int main(void)
         if (swapchain_texture != NULL) {
             SDL_GPUColorTargetInfo colorTargetInfo = {
                 .texture = swapchain_texture,
-                .clear_color = (SDL_FColor){ 0.3f, 0.4f, 0.5f, 1.0f },
+                .clear_color = (SDL_FColor){ 0.3f, 0.9f, 0.3f, 1.0f },
                 .load_op = SDL_GPU_LOADOP_CLEAR,
                 .store_op = SDL_GPU_STOREOP_STORE,
             };
@@ -230,6 +304,7 @@ int main(void)
 
             SDL_BindGPUGraphicsPipeline(rpass, pipeline);
             SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = vertex_buffer, .offset = 0 }, 1);
+            SDL_PushGPUVertexUniformData(cmd_buf, 0, &uniform, sizeof(uniform_t));
             SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
 
             SDL_EndGPURenderPass(rpass);
