@@ -4,6 +4,7 @@
 #include "application.h"
 #include "error.h"
 #include "log.h"
+#include "memory.h"
 #include "window.h"
 
 typedef struct uniform_t uniform_t;
@@ -21,7 +22,7 @@ struct camera_t
     float zoom;
 };
 
-camera_t make_camera(vec2s position, vec2s size)
+camera_t make_camera(const vec2s position, const vec2s size)
 {
     return (camera_t){
         .position = position,
@@ -57,10 +58,11 @@ typedef struct material_vertex_t material_vertex_t;
 struct material_vertex_t
 {
     float position[2];
+    float uv[2];
     float color[4];
 };
 
-SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, int32_t uniform_buffer_count)
+SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, const int32_t sampler_count, const int32_t uniform_buffer_count)
 {
     SDL_GPUShaderStage stage;
     if (SDL_strstr(filename, ".vert")) {
@@ -72,17 +74,23 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, int32_t 
         return NULL;
     }
 
-    // todo: use SDL_vsnprintf to get the len we need then allocate in scratch.
-    char full_path[1024];
+    // todo: this is currently the build directory but can we add a feature flag and inject the project or debugger cwd?
+    const char *base_path = SDL_GetBasePath();
+
     SDL_GPUShaderFormat backend_formats = SDL_GetGPUShaderFormats(device);
     SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
     const char *entrypoint;
 
-    // todo: this is currently the build directory but can we add a feature flag and inject the project or debugger cwd?
-    const char *base_path = SDL_GetBasePath();
+    // todo: use SDL_vsnprintf to get the len we need then allocate in scratch.
+    // char full_path[1024];
+    char *full_path = NULL;
+
+    stack_allocator_t *scratch = mem_scratch_allocator();
 
     if (backend_formats & SDL_GPU_SHADERFORMAT_SPIRV) {
-        SDL_snprintf(full_path, sizeof(full_path), "%s../data/%s.spv", base_path, filename);
+        int32_t len = SDL_snprintf(NULL, 0, "%s../data/%s.spv", base_path, filename);
+        full_path = stack_alloc(scratch, len + 1, MEM_DEFAULT_ALIGN);
+        SDL_snprintf(full_path, len + 1, "%s../data/%s.spv", base_path, filename);
         format = SDL_GPU_SHADERFORMAT_SPIRV;
         entrypoint = "main";
     } else if (backend_formats & SDL_GPU_SHADERFORMAT_MSL) {
@@ -102,8 +110,11 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, int32_t 
     void *code = SDL_LoadFile(full_path, &code_size);
     if (code == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to load shader from path %s.", full_path);
+        stack_dealloc(scratch, full_path);
         return NULL;
     }
+
+    stack_dealloc(scratch, full_path);
 
     SDL_GPUShaderCreateInfo shader_info = {
         .code = code,
@@ -111,7 +122,7 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, int32_t 
         .entrypoint = entrypoint,
         .format = format,
         .stage = stage,
-        .num_samplers = 0,
+        .num_samplers = sampler_count,
         .num_uniform_buffers = uniform_buffer_count,
         .num_storage_buffers = 0,
         .num_storage_textures = 0
@@ -148,14 +159,13 @@ int main(void)
     }
 
     // ----- create shaders
-    // todo: tell shaders how many uniform buffers there are.
-    SDL_GPUShader *vertex_shader = load_shader(device, "material.vert", 1);
+    SDL_GPUShader *vertex_shader = load_shader(device, "material.vert", 0, 1);
     if (vertex_shader == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to create vertex shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
     }
 
-    SDL_GPUShader *fragment_shader = load_shader(device, "material.frag", 0);
+    SDL_GPUShader *fragment_shader = load_shader(device, "material.frag", 1, 0);
     if (fragment_shader == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to create fragment shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
@@ -178,7 +188,7 @@ int main(void)
                     .pitch = sizeof(material_vertex_t),
                 },
             },
-            .num_vertex_attributes = 2,
+            .num_vertex_attributes = 3,
             .vertex_attributes = (SDL_GPUVertexAttribute[]){
                 {
                     .buffer_slot = 0,
@@ -188,9 +198,15 @@ int main(void)
                 },
                 {
                     .buffer_slot = 0,
-                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
                     .location = 1,
                     .offset = sizeof(float) * 2,
+                },
+                {
+                    .buffer_slot = 0,
+                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+                    .location = 2,
+                    .offset = sizeof(float) * 4,
                 },
             },
         },
@@ -200,7 +216,7 @@ int main(void)
     };
 
     SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-    ;
+
     if (pipeline == NULL) {
         log_error(LOG_CATEGORY_GPU, "Failed to create graphics pipeline.");
         exit_application(GPU_GRAPHICS_PIPELINE_CREATION_ERROR);
@@ -209,7 +225,20 @@ int main(void)
     SDL_ReleaseGPUShader(device, vertex_shader);
     SDL_ReleaseGPUShader(device, fragment_shader);
 
-    // todo: model-view-projection uniform buffer
+    // Create samplers.
+
+    SDL_GPUSampler *sampler = SDL_CreateGPUSampler(
+        device,
+        &(SDL_GPUSamplerCreateInfo){
+            .min_filter = SDL_GPU_FILTER_NEAREST,
+            .mag_filter = SDL_GPU_FILTER_NEAREST,
+            .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+            .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+            .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+            .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+        });
+
+    // Create triangle.
 
     SDL_GPUBuffer *vertex_buffer = SDL_CreateGPUBuffer(
         device,
@@ -217,6 +246,7 @@ int main(void)
             .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
             .size = sizeof(material_vertex_t) * 3,
         });
+    SDL_SetGPUBufferName(device, vertex_buffer, "triangle vertex buffer");
 
     // -- Write vertex data to vertex buffer via a transfer buffer.
     SDL_GPUTransferBuffer *vertex_transfer_buffer = SDL_CreateGPUTransferBuffer(
@@ -226,13 +256,43 @@ int main(void)
             .size = sizeof(material_vertex_t) * 3,
         });
 
-    material_vertex_t *transfer_data = SDL_MapGPUTransferBuffer(device, vertex_transfer_buffer, false);
+    material_vertex_t *vertex_transfer_data = SDL_MapGPUTransferBuffer(device, vertex_transfer_buffer, false);
 
-    transfer_data[0] = (material_vertex_t){ 0.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
-    transfer_data[1] = (material_vertex_t){ 50.0f, 100.0f, 0.7f, 0.1f, 0.1f, 1.0f };
-    transfer_data[2] = (material_vertex_t){ 100.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    vertex_transfer_data[0] = (material_vertex_t){ 0.0f, 0.0f, 0.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    vertex_transfer_data[1] = (material_vertex_t){ 50.0f, 100.0f, 0.5f, 1.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    vertex_transfer_data[2] = (material_vertex_t){ 100.0f, 0.0f, 1.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
 
     SDL_UnmapGPUTransferBuffer(device, vertex_transfer_buffer);
+
+    // Create default material.
+    uint8_t default_material_data[4] = { 0xff, 0xff, 0xff, 0xff }; // RGBA
+    SDL_Surface *default_material_surface = SDL_CreateSurfaceFrom(1, 1, SDL_PIXELFORMAT_RGBA8888, default_material_data, 4);
+
+    SDL_GPUTexture *default_material_texture = SDL_CreateGPUTexture(
+        device,
+        &(SDL_GPUTextureCreateInfo){
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, // todo: how do we use SRGB in SDL?
+            .width = default_material_surface->w,
+            .height = default_material_surface->h,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        });
+    SDL_SetGPUTextureName(device, default_material_texture, "default material");
+
+    SDL_GPUTransferBuffer *texture_transfer_buffer = SDL_CreateGPUTransferBuffer(
+        device,
+        &(SDL_GPUTransferBufferCreateInfo){
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = default_material_surface->w * default_material_surface->h * 4,
+        });
+
+    uint8_t *texture_transfer_data = SDL_MapGPUTransferBuffer(device, texture_transfer_buffer, false);
+
+    SDL_memcpy(texture_transfer_data, default_material_surface->pixels, default_material_surface->w * default_material_surface->h * 4);
+
+    SDL_UnmapGPUTransferBuffer(device, texture_transfer_buffer);
 
     // Upload the data to the GPU.
     SDL_GPUCommandBuffer *upload_cmd_buf = SDL_AcquireGPUCommandBuffer(device);
@@ -251,11 +311,26 @@ int main(void)
         },
         false);
 
+    SDL_UploadToGPUTexture(
+        copy_pass,
+        &(SDL_GPUTextureTransferInfo){
+            .transfer_buffer = texture_transfer_buffer,
+            .offset = 0,
+        },
+        &(SDL_GPUTextureRegion){
+            .texture = default_material_texture,
+            .w = default_material_surface->w,
+            .h = default_material_surface->h,
+            .d = 1,
+        },
+        false);
+
     SDL_EndGPUCopyPass(copy_pass);
     SDL_SubmitGPUCommandBuffer(upload_cmd_buf);
     SDL_ReleaseGPUTransferBuffer(device, vertex_transfer_buffer);
 
     // ------------
+
     camera_t camera = make_camera(glms_vec2_make((float[]){ 0.0f, 0.0f }), glms_vec2_make((float[]){ 1920.0f, 1080.0f }));
     mat4s projection = get_camera_projection_matrix(&camera);
     mat4s view = get_camera_view_matrix(&camera);
@@ -305,6 +380,7 @@ int main(void)
             SDL_BindGPUGraphicsPipeline(rpass, pipeline);
             SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = vertex_buffer, .offset = 0 }, 1);
             SDL_PushGPUVertexUniformData(cmd_buf, 0, &uniform, sizeof(uniform_t));
+            SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = default_material_texture, .sampler = sampler }, 1);
             SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
 
             SDL_EndGPURenderPass(rpass);
