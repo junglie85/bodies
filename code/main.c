@@ -7,6 +7,13 @@
 #include "memory.h"
 #include "window.h"
 
+// todo: perspective camera (game and editor).
+// todo: cube with index buffers
+// todo: move camera's with mouse
+// todo: draw rect onto editor UI render target and composite onto swapchain
+// todo: handle window resize (keep perspective, then just increase viewport width)
+// todo: tidy up code.
+
 typedef struct uniform_t uniform_t;
 struct uniform_t
 {
