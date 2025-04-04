@@ -158,24 +158,89 @@ int main(void)
         exit(GPU_WINDOW_CLAIM_ERROR);
     }
 
+    int32_t window_width = 0;
+    int32_t window_height = 0;
+
+    // ----- Swapchain render pipeline
     // ----- create shaders
-    SDL_GPUShader *vertex_shader = load_shader(device, "material.vert", 0, 1);
-    if (vertex_shader == NULL) {
-        log_error(LOG_CATEGORY_GPU, "Failed to create vertex shader.");
+    SDL_GPUShader *swapchain_vertex_shader = load_shader(device, "swapchain.vert", 0, 1);
+    if (swapchain_vertex_shader == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create swapchain vertex shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
     }
 
-    SDL_GPUShader *fragment_shader = load_shader(device, "material.frag", 1, 0);
-    if (fragment_shader == NULL) {
-        log_error(LOG_CATEGORY_GPU, "Failed to create fragment shader.");
+    SDL_GPUShader *swapchain_fragment_shader = load_shader(device, "swapchain.frag", 1, 0);
+    if (swapchain_fragment_shader == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create swapchain fragment shader.");
         exit_application(GPU_SHADER_CREATION_ERROR);
     }
 
-    SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {
+    SDL_GPUGraphicsPipelineCreateInfo swapchain_pipeline_info = {
         .target_info = {
             .num_color_targets = 1,
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
                 { .format = SDL_GetGPUSwapchainTextureFormat(device, window_handle()) },
+            },
+        },
+        .vertex_input_state = (SDL_GPUVertexInputState){
+            .num_vertex_buffers = 0,
+            .vertex_buffer_descriptions = (SDL_GPUVertexBufferDescription[]){},
+            .num_vertex_attributes = 0,
+            .vertex_attributes = (SDL_GPUVertexAttribute[]){},
+        },
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .vertex_shader = swapchain_vertex_shader,
+        .fragment_shader = swapchain_fragment_shader,
+    };
+
+    SDL_GPUGraphicsPipeline *swapchain_pipeline = SDL_CreateGPUGraphicsPipeline(device, &swapchain_pipeline_info);
+
+    if (swapchain_pipeline == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create swapchain graphics pipeline.");
+        exit_application(GPU_GRAPHICS_PIPELINE_CREATION_ERROR);
+    }
+
+    SDL_ReleaseGPUShader(device, swapchain_vertex_shader);
+    SDL_ReleaseGPUShader(device, swapchain_fragment_shader);
+
+    // ----- 3D render target pipeline
+    // Render target texture needs to have the same dimensions as the swapchain.
+    get_window_size(&window_width, &window_height);
+    SDL_GPUTexture *render_target = SDL_CreateGPUTexture(
+        device,
+        &(SDL_GPUTextureCreateInfo){
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+            .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+            .width = window_width,
+            .height = window_height,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .sample_count = 1,
+        });
+    if (render_target == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create render target texture.");
+        exit_application(GPU_TEXTURE_CREATION_ERROR);
+    }
+
+    // ----- create shaders
+    SDL_GPUShader *material_vertex_shader = load_shader(device, "material.vert", 0, 1);
+    if (material_vertex_shader == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create material vertex shader.");
+        exit_application(GPU_SHADER_CREATION_ERROR);
+    }
+
+    SDL_GPUShader *material_fragment_shader = load_shader(device, "material.frag", 1, 0);
+    if (material_fragment_shader == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create material fragment shader.");
+        exit_application(GPU_SHADER_CREATION_ERROR);
+    }
+
+    SDL_GPUGraphicsPipelineCreateInfo material_pipeline_info = {
+        .target_info = {
+            .num_color_targets = 1,
+            .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
+                { .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM },
             },
         },
         .vertex_input_state = (SDL_GPUVertexInputState){
@@ -211,19 +276,19 @@ int main(void)
             },
         },
         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-        .vertex_shader = vertex_shader,
-        .fragment_shader = fragment_shader,
+        .vertex_shader = material_vertex_shader,
+        .fragment_shader = material_fragment_shader,
     };
 
-    SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+    SDL_GPUGraphicsPipeline *material_pipeline = SDL_CreateGPUGraphicsPipeline(device, &material_pipeline_info);
 
-    if (pipeline == NULL) {
-        log_error(LOG_CATEGORY_GPU, "Failed to create graphics pipeline.");
+    if (material_pipeline == NULL) {
+        log_error(LOG_CATEGORY_GPU, "Failed to create material graphics pipeline.");
         exit_application(GPU_GRAPHICS_PIPELINE_CREATION_ERROR);
     }
 
-    SDL_ReleaseGPUShader(device, vertex_shader);
-    SDL_ReleaseGPUShader(device, fragment_shader);
+    SDL_ReleaseGPUShader(device, material_vertex_shader);
+    SDL_ReleaseGPUShader(device, material_fragment_shader);
 
     // Create samplers.
 
@@ -353,6 +418,11 @@ int main(void)
             continue;
         }
 
+        if (window_was_resized()) {
+            get_window_size(&window_width, &window_height);
+            // todo: resize render targets
+        }
+
         SDL_GPUCommandBuffer *cmd_buf = SDL_AcquireGPUCommandBuffer(device);
         if (cmd_buf == NULL) {
             log_error(LOG_CATEGORY_GPU, "AcquireGPUCommandBuffer failed: %s", SDL_GetError());
@@ -360,16 +430,9 @@ int main(void)
             continue;
         }
 
-        SDL_GPUTexture *swapchain_texture;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buf, window_handle(), &swapchain_texture, NULL, NULL)) {
-            log_error(LOG_CATEGORY_GPU, "WaitAndAcquireGPUSwapchainTexture failed: %s", SDL_GetError());
-            exit_window_event_loop();
-            continue;
-        }
-
-        if (swapchain_texture != NULL) {
+        if (render_target != NULL) {
             SDL_GPUColorTargetInfo colorTargetInfo = {
-                .texture = swapchain_texture,
+                .texture = render_target,
                 .clear_color = (SDL_FColor){ 0.3f, 0.9f, 0.3f, 1.0f },
                 .load_op = SDL_GPU_LOADOP_CLEAR,
                 .store_op = SDL_GPU_STOREOP_STORE,
@@ -377,7 +440,7 @@ int main(void)
 
             SDL_GPURenderPass *rpass = SDL_BeginGPURenderPass(cmd_buf, &colorTargetInfo, 1, NULL);
 
-            SDL_BindGPUGraphicsPipeline(rpass, pipeline);
+            SDL_BindGPUGraphicsPipeline(rpass, material_pipeline);
             SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = vertex_buffer, .offset = 0 }, 1);
             SDL_PushGPUVertexUniformData(cmd_buf, 0, &uniform, sizeof(uniform_t));
             SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = default_material_texture, .sampler = sampler }, 1);
@@ -386,10 +449,41 @@ int main(void)
             SDL_EndGPURenderPass(rpass);
         }
 
+        SDL_GPUTexture *swapchain_texture;
+        uint32_t swapchain_width;
+        uint32_t swapchain_height;
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buf, window_handle(), &swapchain_texture, &swapchain_width, &swapchain_height)) {
+            log_error(LOG_CATEGORY_GPU, "WaitAndAcquireGPUSwapchainTexture failed: %s", SDL_GetError());
+            exit_window_event_loop();
+            continue;
+        }
+
+        if (swapchain_width != window_width || swapchain_height != window_height) {
+            log_warn(LOG_CATEGORY_GPU, "Swapchain size (%d x %d) differs from window size (%d x %d).", swapchain_width, swapchain_height, window_width, window_height);
+        }
+
+        if (swapchain_texture != NULL) {
+            SDL_GPUColorTargetInfo colorTargetInfo = {
+                .texture = swapchain_texture,
+                .clear_color = (SDL_FColor){ 0.3f, 0.3f, 0.9f, 1.0f },
+                .load_op = SDL_GPU_LOADOP_CLEAR,
+                .store_op = SDL_GPU_STOREOP_STORE,
+            };
+
+            SDL_GPURenderPass *rpass = SDL_BeginGPURenderPass(cmd_buf, &colorTargetInfo, 1, NULL);
+
+            SDL_BindGPUGraphicsPipeline(rpass, swapchain_pipeline);
+            SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = render_target, .sampler = sampler }, 1);
+            SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
+
+            SDL_EndGPURenderPass(rpass);
+        }
+
         SDL_SubmitGPUCommandBuffer(cmd_buf);
     }
 
-    SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+    SDL_ReleaseGPUGraphicsPipeline(device, material_pipeline);
+    SDL_ReleaseGPUGraphicsPipeline(device, swapchain_pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer);
 
     SDL_ReleaseWindowFromGPUDevice(device, window_handle());

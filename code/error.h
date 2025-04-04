@@ -7,5 +7,6 @@
 #define GPU_WINDOW_CLAIM_ERROR               -4
 #define GPU_SHADER_CREATION_ERROR            -5
 #define GPU_GRAPHICS_PIPELINE_CREATION_ERROR -6
+#define GPU_TEXTURE_CREATION_ERROR           -7
 
 #endif // ERROR_H
