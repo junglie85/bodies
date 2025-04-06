@@ -316,29 +316,42 @@ int main(void)
 
     // Create triangle.
 
-    SDL_GPUBuffer *vertex_buffer = SDL_CreateGPUBuffer(
+    SDL_GPUBuffer *triangle_vertex_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo){
             .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
             .size = sizeof(material_vertex_t) * 3,
         });
-    SDL_SetGPUBufferName(device, vertex_buffer, "triangle vertex buffer");
+    SDL_SetGPUBufferName(device, triangle_vertex_buffer, "triangle vertex buffer");
 
-    // -- Write vertex data to vertex buffer via a transfer buffer.
-    SDL_GPUTransferBuffer *vertex_transfer_buffer = SDL_CreateGPUTransferBuffer(
+    SDL_GPUBuffer *triangle_index_buffer = SDL_CreateGPUBuffer(
+        device,
+        &(SDL_GPUBufferCreateInfo){
+            .usage = SDL_GPU_BUFFERUSAGE_INDEX,
+            .size = sizeof(uint16_t) * 3,
+        });
+    SDL_SetGPUBufferName(device, triangle_index_buffer, "triangle index buffer");
+
+    // -- Write triangle data to GPU via a transfer buffer.
+    SDL_GPUTransferBuffer *triangle_transfer_buffer = SDL_CreateGPUTransferBuffer(
         device,
         &(SDL_GPUTransferBufferCreateInfo){
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = sizeof(material_vertex_t) * 3,
+            .size = sizeof(material_vertex_t) * 3 + sizeof(uint16_t) * 3,
         });
 
-    material_vertex_t *vertex_transfer_data = SDL_MapGPUTransferBuffer(device, vertex_transfer_buffer, false);
+    material_vertex_t *triangle_transfer_data = SDL_MapGPUTransferBuffer(device, triangle_transfer_buffer, false);
 
-    vertex_transfer_data[0] = (material_vertex_t){ 0.0f, 0.0f, 0.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
-    vertex_transfer_data[1] = (material_vertex_t){ 50.0f, 100.0f, 0.5f, 1.0f, 0.7f, 0.1f, 0.1f, 1.0f };
-    vertex_transfer_data[2] = (material_vertex_t){ 100.0f, 0.0f, 1.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    triangle_transfer_data[0] = (material_vertex_t){ 0.0f, 0.0f, 0.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    triangle_transfer_data[1] = (material_vertex_t){ 50.0f, 100.0f, 0.5f, 1.0f, 0.7f, 0.1f, 0.1f, 1.0f };
+    triangle_transfer_data[2] = (material_vertex_t){ 100.0f, 0.0f, 1.0f, 0.0f, 0.7f, 0.1f, 0.1f, 1.0f };
 
-    SDL_UnmapGPUTransferBuffer(device, vertex_transfer_buffer);
+    uint16_t *index_data = (uint16_t *)&triangle_transfer_data[3];
+    index_data[0] = 0;
+    index_data[1] = 1;
+    index_data[2] = 2;
+
+    SDL_UnmapGPUTransferBuffer(device, triangle_transfer_buffer);
 
     // Create default material.
     uint8_t default_material_data[4] = { 0xff, 0xff, 0xff, 0xff }; // RGBA
@@ -357,18 +370,18 @@ int main(void)
         });
     SDL_SetGPUTextureName(device, default_material_texture, "default material");
 
-    SDL_GPUTransferBuffer *texture_transfer_buffer = SDL_CreateGPUTransferBuffer(
+    SDL_GPUTransferBuffer *default_texture_transfer_buffer = SDL_CreateGPUTransferBuffer(
         device,
         &(SDL_GPUTransferBufferCreateInfo){
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
             .size = default_material_surface->w * default_material_surface->h * 4,
         });
 
-    uint8_t *texture_transfer_data = SDL_MapGPUTransferBuffer(device, texture_transfer_buffer, false);
+    uint8_t *texture_transfer_data = SDL_MapGPUTransferBuffer(device, default_texture_transfer_buffer, false);
 
     SDL_memcpy(texture_transfer_data, default_material_surface->pixels, default_material_surface->w * default_material_surface->h * 4);
 
-    SDL_UnmapGPUTransferBuffer(device, texture_transfer_buffer);
+    SDL_UnmapGPUTransferBuffer(device, default_texture_transfer_buffer);
 
     // Create Mondrian material.
     image_t mondrian = load_image("images/mondrian.png");
@@ -409,20 +422,33 @@ int main(void)
     SDL_UploadToGPUBuffer(
         copy_pass,
         &(SDL_GPUTransferBufferLocation){
-            .transfer_buffer = vertex_transfer_buffer,
+            .transfer_buffer = triangle_transfer_buffer,
             .offset = 0,
         },
         &(SDL_GPUBufferRegion){
-            .buffer = vertex_buffer,
+            .buffer = triangle_vertex_buffer,
             .offset = 0,
             .size = sizeof(material_vertex_t) * 3,
+        },
+        false);
+
+    SDL_UploadToGPUBuffer(
+        copy_pass,
+        &(SDL_GPUTransferBufferLocation){
+            .transfer_buffer = triangle_transfer_buffer,
+            .offset = sizeof(material_vertex_t) * 3,
+        },
+        &(SDL_GPUBufferRegion){
+            .buffer = triangle_index_buffer,
+            .offset = 0,
+            .size = sizeof(uint16_t) * 3,
         },
         false);
 
     SDL_UploadToGPUTexture(
         copy_pass,
         &(SDL_GPUTextureTransferInfo){
-            .transfer_buffer = texture_transfer_buffer,
+            .transfer_buffer = default_texture_transfer_buffer,
             .offset = 0,
         },
         &(SDL_GPUTextureRegion){
@@ -449,7 +475,9 @@ int main(void)
 
     SDL_EndGPUCopyPass(copy_pass);
     SDL_SubmitGPUCommandBuffer(upload_cmd_buf);
-    SDL_ReleaseGPUTransferBuffer(device, vertex_transfer_buffer);
+    SDL_ReleaseGPUTransferBuffer(device, triangle_transfer_buffer);
+    SDL_ReleaseGPUTransferBuffer(device, mondrian_transfer_buffer);
+    SDL_ReleaseGPUTransferBuffer(device, default_texture_transfer_buffer);
 
     // ------------
 
@@ -498,11 +526,13 @@ int main(void)
             SDL_GPURenderPass *rpass = SDL_BeginGPURenderPass(cmd_buf, &colorTargetInfo, 1, NULL);
 
             SDL_BindGPUGraphicsPipeline(rpass, material_pipeline);
-            SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = vertex_buffer, .offset = 0 }, 1);
+            SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = triangle_vertex_buffer, .offset = 0 }, 1);
+            SDL_BindGPUIndexBuffer(rpass, &(SDL_GPUBufferBinding){ .buffer = triangle_index_buffer, .offset = 0 }, SDL_GPU_INDEXELEMENTSIZE_16BIT);
             SDL_PushGPUVertexUniformData(cmd_buf, 0, &uniform, sizeof(uniform_t));
             // SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = default_material_texture, .sampler = sampler }, 1);
             SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = mondrian_texture, .sampler = sampler }, 1);
-            SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
+            // SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
+            SDL_DrawGPUIndexedPrimitives(rpass, 3, 1, 0, 0, 0);
 
             SDL_EndGPURenderPass(rpass);
         }
@@ -547,7 +577,7 @@ int main(void)
 
     SDL_ReleaseGPUGraphicsPipeline(device, material_pipeline);
     SDL_ReleaseGPUGraphicsPipeline(device, swapchain_pipeline);
-    SDL_ReleaseGPUBuffer(device, vertex_buffer);
+    SDL_ReleaseGPUBuffer(device, triangle_vertex_buffer);
 
     SDL_ReleaseWindowFromGPUDevice(device, window_handle());
     SDL_DestroyGPUDevice(device);
