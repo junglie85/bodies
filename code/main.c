@@ -3,6 +3,7 @@
 
 #include "application.h"
 #include "error.h"
+#include "image.h"
 #include "log.h"
 #include "memory.h"
 #include "window.h"
@@ -82,14 +83,13 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, const in
     }
 
     // todo: this is currently the build directory but can we add a feature flag and inject the project or debugger cwd?
+    // todo: get base path once and cache it at startup?
     const char *base_path = SDL_GetBasePath();
 
     SDL_GPUShaderFormat backend_formats = SDL_GetGPUShaderFormats(device);
     SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
     const char *entrypoint;
 
-    // todo: use SDL_vsnprintf to get the len we need then allocate in scratch.
-    // char full_path[1024];
     char *full_path = NULL;
 
     stack_allocator_t *scratch = mem_scratch_allocator();
@@ -101,11 +101,15 @@ SDL_GPUShader *load_shader(SDL_GPUDevice *device, const char *filename, const in
         format = SDL_GPU_SHADERFORMAT_SPIRV;
         entrypoint = "main";
     } else if (backend_formats & SDL_GPU_SHADERFORMAT_MSL) {
-        SDL_snprintf(full_path, sizeof(full_path), "%s../data/%s.msl", base_path, filename);
+        int32_t len = SDL_snprintf(NULL, 0, "%s../data/%s.msl", base_path, filename);
+        full_path = stack_alloc(scratch, len + 1, MEM_DEFAULT_ALIGN);
+        SDL_snprintf(full_path, len + 1, "%s../data/%s.msl", base_path, filename);
         format = SDL_GPU_SHADERFORMAT_MSL;
         entrypoint = "main0";
     } else if (backend_formats & SDL_GPU_SHADERFORMAT_DXIL) {
-        SDL_snprintf(full_path, sizeof(full_path), "%s../data/%s.dxil", base_path, filename);
+        int32_t len = SDL_snprintf(NULL, 0, "%s../data/%s.dxil", base_path, filename);
+        full_path = stack_alloc(scratch, len + 1, MEM_DEFAULT_ALIGN);
+        SDL_snprintf(full_path, len + 1, "%s../data/%s.dxil", base_path, filename);
         format = SDL_GPU_SHADERFORMAT_DXIL;
         entrypoint = "main";
     } else {
@@ -366,6 +370,38 @@ int main(void)
 
     SDL_UnmapGPUTransferBuffer(device, texture_transfer_buffer);
 
+    // Create Mondrian material.
+    image_t mondrian = load_image("images/mondrian.png");
+    // todo: make SDL_Surface part of image?
+    SDL_Surface *mondrian_surface = SDL_CreateSurfaceFrom(mondrian.width, mondrian.height, SDL_PIXELFORMAT_RGBA8888, mondrian.data, mondrian.pitch);
+
+    SDL_GPUTexture *mondrian_texture = SDL_CreateGPUTexture(
+        device,
+        &(SDL_GPUTextureCreateInfo){
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, // todo: how do we use SRGB in SDL?
+            .width = mondrian_surface->w,
+            .height = mondrian_surface->h,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        });
+    SDL_SetGPUTextureName(device, mondrian_texture, "mondrian material");
+
+    int32_t bytes_per_pixel = image_bytes_per_pixel(&mondrian);
+    SDL_GPUTransferBuffer *mondrian_transfer_buffer = SDL_CreateGPUTransferBuffer(
+        device,
+        &(SDL_GPUTransferBufferCreateInfo){
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = mondrian_surface->w * mondrian_surface->h * bytes_per_pixel,
+        });
+
+    uint8_t *mondrian_transfer_data = SDL_MapGPUTransferBuffer(device, mondrian_transfer_buffer, false);
+
+    SDL_memcpy(mondrian_transfer_data, mondrian_surface->pixels, mondrian_surface->w * mondrian_surface->h * 4);
+
+    SDL_UnmapGPUTransferBuffer(device, mondrian_transfer_buffer);
+
     // Upload the data to the GPU.
     SDL_GPUCommandBuffer *upload_cmd_buf = SDL_AcquireGPUCommandBuffer(device);
     SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(upload_cmd_buf);
@@ -393,6 +429,20 @@ int main(void)
             .texture = default_material_texture,
             .w = default_material_surface->w,
             .h = default_material_surface->h,
+            .d = 1,
+        },
+        false);
+
+    SDL_UploadToGPUTexture(
+        copy_pass,
+        &(SDL_GPUTextureTransferInfo){
+            .transfer_buffer = mondrian_transfer_buffer,
+            .offset = 0,
+        },
+        &(SDL_GPUTextureRegion){
+            .texture = mondrian_texture,
+            .w = mondrian_surface->w,
+            .h = mondrian_surface->h,
             .d = 1,
         },
         false);
@@ -450,7 +500,8 @@ int main(void)
             SDL_BindGPUGraphicsPipeline(rpass, material_pipeline);
             SDL_BindGPUVertexBuffers(rpass, 0, &(SDL_GPUBufferBinding){ .buffer = vertex_buffer, .offset = 0 }, 1);
             SDL_PushGPUVertexUniformData(cmd_buf, 0, &uniform, sizeof(uniform_t));
-            SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = default_material_texture, .sampler = sampler }, 1);
+            // SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = default_material_texture, .sampler = sampler }, 1);
+            SDL_BindGPUFragmentSamplers(rpass, 0, &(SDL_GPUTextureSamplerBinding){ .texture = mondrian_texture, .sampler = sampler }, 1);
             SDL_DrawGPUPrimitives(rpass, 3, 1, 0, 0);
 
             SDL_EndGPURenderPass(rpass);
@@ -488,6 +539,11 @@ int main(void)
 
         SDL_SubmitGPUCommandBuffer(cmd_buf);
     }
+
+    free_image(&mondrian);
+
+    SDL_DestroySurface(mondrian_surface);
+    SDL_DestroySurface(default_material_surface);
 
     SDL_ReleaseGPUGraphicsPipeline(device, material_pipeline);
     SDL_ReleaseGPUGraphicsPipeline(device, swapchain_pipeline);

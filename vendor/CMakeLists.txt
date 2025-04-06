@@ -1,23 +1,32 @@
 cmake_minimum_required(VERSION 3.30)
 project(bodies_vendor VERSION 0.0.1 LANGUAGES C)
 
-set(HEADER_LIST tlsf.h)
+set(HEADER_LIST
+        stb_image.h
+        tlsf.h
+)
 add_library(vendor STATIC tlsf.c ${HEADER_LIST})
+target_sources(vendor PUBLIC
+        FILE_SET public_headers
+        TYPE HEADERS
+        BASE_DIRS .
+        FILES ${HEADER_LIST}
+)
 
-target_include_directories(vendor SYSTEM BEFORE PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include/vendor>
+target_include_directories(vendor SYSTEM BEFORE PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include/vendor>
 )
 
 if (MSVC AND NOT BUILD_SHARED_LIBS)
     # Set the output name for debugger files, otherwise they are not generated:
     set_target_properties(vendor
-        PROPERTIES
-        COMPILE_PDB_NAME_DEBUG vendor
-        COMPILE_PDB_NAME_RELEASE vendor
-        COMPILE_PDB_NAME_MINSIZEREL vendor
-        COMPILE_PDB_NAME_RELWITHDEBINFO vendor)
-endif()
+            PROPERTIES
+            COMPILE_PDB_NAME_DEBUG vendor
+            COMPILE_PDB_NAME_RELEASE vendor
+            COMPILE_PDB_NAME_MINSIZEREL vendor
+            COMPILE_PDB_NAME_RELWITHDEBINFO vendor)
+endif ()
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -33,10 +42,12 @@ configure_package_config_file("cmake/${LIB_NAME}Config.cmake.in" "${PACKAGE_CONF
 write_basic_package_version_file("${VERSION_CONFIG}" COMPATIBILITY ExactVersion)
 
 install(TARGETS vendor
-    EXPORT "${TARGETS_EXPORT_NAME}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/vendor"
-    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-install(FILES "${HEADER_LIST}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vendor")
+        EXPORT "${TARGETS_EXPORT_NAME}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/vendor"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vendor")
+#install(FILES "${HEADER_LIST}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vendor")
+#install(TARGETS vendor FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vendor")
 install(FILES "${PACKAGE_CONFIG}" "${VERSION_CONFIG}" DESTINATION "${CONFIG_INSTALL_DIR}")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor.pdb" DESTINATION "${CMAKE_INSTALL_LIBDIR}" CONFIGURATIONS Debug)
 install(EXPORT "${TARGETS_EXPORT_NAME}" NAMESPACE "bodies::" DESTINATION "${CONFIG_INSTALL_DIR}")

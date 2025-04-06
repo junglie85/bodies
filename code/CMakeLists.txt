@@ -15,12 +15,14 @@ add_executable(bodies
         application.c
         application.h
         error.h
+        image.c
+        image.h
         log.c
         log.h
-        window.c
-        window.h
         memory.c
         memory.h
+        window.c
+        window.h
 )
 
 set(LIBS bodies::vendor SDL3::SDL3-static cglm::cglm)
